@@ -52,6 +52,7 @@ async function run() {
     const usersCollection = client.db('bistroDb').collection('users')
     const menuCollection = client.db('bistroDb').collection('menu')
     const cartCollection = client.db('bistroDb').collection('carts')
+    const paymentCollection = client.db('bistroDb').collection('payment')
 
     // jwt related apis
     app.post('/jwt', (req, res) => {
@@ -158,17 +159,38 @@ async function run() {
     })
 
     // create payment method
-    app.post('/create-payment-intend', async(req,res) => {
+    app.post('/create-payment-intend', verifyJWT, async(req,res) => {
       const {price} = req.body;
       const amount = price *100;
       const paymentIntent = await stripe.paymentIntents.create({
         amount: amount,
         currency: "usd",
-        automatic_payment_methods:['card']
+        payment_method_types: ['card']
       })
       res.send({
         clientSecret: paymentIntent.client_secret
       })
+    })
+
+    // Payment related api
+    app.post('/payment', async(req,res) => {
+      const payment = req.body
+      const insertResult = await paymentCollection.insertOne(payment);
+
+      const query = {_id: {$in: payment.cartItems.map(id => new ObjectId(id))}}
+      const deleteResult = await cartCollection.deleteMany(query)
+      res.send({insertResult, deleteResult})
+    })
+
+    // admin states related api
+    app.get('/admin-states', async(req,res) => {
+      const orders = await paymentCollection.estimatedDocumentCount();
+      const customers = await usersCollection.estimatedDocumentCount();
+      const products = await cartCollection.estimatedDocumentCount();
+
+      const payment = await paymentCollection.find().toArray();
+      const reveneu = payment.reduce((sum, payment) => sum + payment.price,0)
+      res.send({orders, customers,reveneu, products})
     })
 
     await client.db("admin").command({ ping: 1 });
